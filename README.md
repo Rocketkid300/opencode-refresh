@@ -11,10 +11,11 @@ Over time, OpenCode installations accumulate old auth tokens, stale cache files,
 However, uninstalling or clearing data directories normally wipes all of your past conversations and prompts.
 
 `opencode-refresh` solves this with a single command or desktop shortcut:
-1. **Backs up** your chat history into a timestamped SQLite archive.
+1. **Backs up** your chat history into a timestamped SQLite archive under `~/opencode-refresh-backups/`.
 2. **Wipes** all stale config, cache, state, snapshots, and credentials.
 3. **Reinstalls** `opencode` cleanly via `pacman` (without upgrading your entire system!).
-4. **Restores** only your chat history (`sessions`, `messages`, `parts`, `projects`) into a pristine database.
+4. **Leaves OpenCode 100% fresh** (no old sessions, zero legacy migration popups, brand-new feel).
+5. Provides an optional `--restore` command whenever you want to restore any past backup.
 
 ---
 
@@ -49,15 +50,22 @@ cd opencode-refresh
 ## 🚀 How to Use
 
 ### 1. From Terminal
-Just run:
+To refresh OpenCode cleanly:
 ```bash
 opencode-refresh
 ```
 It will display the proposed actions and current table counts, asking for your confirmation (`yes`) before making any changes.
 
+To restore an old backup anytime:
+```bash
+opencode-refresh --restore
+# or specify the path:
+opencode-refresh --restore ~/opencode-refresh-backups/<timestamp>
+```
+
 ### 2. From Application Launcher
 Search for **OpenCode Refresh** in your application launcher (Rofi, Wofi, KDE Application Launcher, GNOME, etc.).
-A terminal window will pop up, perform the backup, prompt for sudo password to refresh the package, restore the chat history, and pause so you can review the results.
+A terminal window will pop up, perform the backup, refresh the package, and leave OpenCode completely fresh.
 
 ---
 
