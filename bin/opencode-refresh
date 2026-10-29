@@ -122,8 +122,17 @@ fi
 need sqlite3
 need pacman
 need rsync
-need opencode
-[[ -f "$DB" ]] || die "OpenCode database not found: $DB"
+
+# If DB is missing, check if we have a previous backup to restore from
+LATEST_BACKUP=""
+if [[ ! -f "$DB" ]]; then
+  if [[ -d "$BACKUP_ROOT" ]]; then
+    LATEST_BACKUP="$(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d | sort -r | head -n 1)"
+  fi
+  if [[ -z "$LATEST_BACKUP" || ! -f "$LATEST_BACKUP/opencode.db.history" ]]; then
+    die "OpenCode database not found at $DB and no previous backup found in $BACKUP_ROOT"
+  fi
+fi
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP="$BACKUP_ROOT/$STAMP"
@@ -144,7 +153,12 @@ echo
 echo "Kept:     sessions, messages, parts, projects (needed to list chats)"
 echo "Removed:  auth, credentials, config, cache, state, snapshots, kv"
 echo
-print_counts "$DB" "Current database:"
+if [[ -f "$DB" ]]; then
+  print_counts "$DB" "Current database:"
+else
+  echo "Current database: none found on disk"
+  print_counts "$LATEST_BACKUP/opencode.db.history" "Will restore from previous backup ($LATEST_BACKUP):"
+fi
 echo
 printf "Type yes to continue: "
 read -r answer
@@ -154,14 +168,19 @@ echo
 echo "==> Stopping OpenCode"
 stop_opencode
 
-echo "==> Backing up database"
-mkdir -p "$BACKUP"
-sqlite3 "$DB" ".backup '$FULL_DB'"
-cp -a "$FULL_DB" "$HIST_DB"
-sqlite3 "$FULL_DB" "PRAGMA integrity_check;" | grep -qx ok || die "full backup failed integrity_check"
-strip_non_history "$HIST_DB"
-print_counts "$HIST_DB" "History backup:"
-echo "Backup saved: $BACKUP"
+if [[ -f "$DB" ]]; then
+  echo "==> Backing up database"
+  mkdir -p "$BACKUP"
+  sqlite3 "$DB" ".backup '$FULL_DB'"
+  cp -a "$FULL_DB" "$HIST_DB"
+  sqlite3 "$FULL_DB" "PRAGMA integrity_check;" | grep -qx ok || die "full backup failed integrity_check"
+  strip_non_history "$HIST_DB"
+  print_counts "$HIST_DB" "History backup:"
+  echo "Backup saved: $BACKUP"
+else
+  HIST_DB="$LATEST_BACKUP/opencode.db.history"
+  echo "==> Using existing backup for restoration: $HIST_DB"
+fi
 
 echo "==> Wiping OpenCode directories"
 rm -rf "$DATA" "$CONFIG" "$STATE" "$CACHE"
