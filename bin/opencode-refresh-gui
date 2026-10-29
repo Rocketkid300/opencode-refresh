@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+# Run the refresh tool
+if command -v opencode-refresh >/dev/null 2>&1; then
+  opencode-refresh
+elif [[ -x "$HOME/.local/bin/opencode-refresh" ]]; then
+  "$HOME/.local/bin/opencode-refresh"
+else
+  echo "Error: opencode-refresh script not found on PATH or in ~/.local/bin" >&2
+  exit 1
+fi
+status=$?
+
+# Always keep the terminal window open for review regardless of exit status
+echo
+read -rp "Press Enter to exit..."
+exit $status

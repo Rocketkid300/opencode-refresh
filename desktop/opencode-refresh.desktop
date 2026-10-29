@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OpenCode Refresh
+GenericName=Clean Reinstall OpenCode
+Comment=Reinstall OpenCode cleanly while preserving chat sessions and messages
+Exec=opencode-refresh-gui
+Icon=view-refresh
+Terminal=true
+Categories=Development;
+Keywords=opencode;refresh;reinstall;clean;backup;restore;chat;history;
+StartupNotify=false

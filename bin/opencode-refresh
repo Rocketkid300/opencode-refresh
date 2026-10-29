@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# Fresh OpenCode install that keeps only chat history (sessions + messages).
+set -euo pipefail
+
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/opencode"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/opencode"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/opencode"
+DB="$DATA/opencode.db"
+BACKUP_ROOT="$HOME/opencode-refresh-backups"
+
+KEEP_TABLES=(
+  __drizzle_migrations
+  migration
+  sqlite_sequence
+  project
+  project_directory
+  worktree
+  workspace
+  session
+  session_v2
+  session_inbox
+  session_message
+  session_pending
+  message
+  part
+  todo
+  instruction_blob
+  instruction_entry
+  instruction_state
+  blob
+  blob_ref
+)
+
+STRIP_TABLES=(
+  account
+  account_state
+  control_account
+  credential
+  kv
+  permission
+  event
+  event_sequence
+  schedule
+  session_share
+)
+
+usage() {
+  cat <<'EOF'
+Usage: opencode-refresh
+
+Makes OpenCode feel like a clean reinstall, but keeps chat sessions/messages.
+
+  1. Backs up chat history from the SQLite database
+  2. Wipes data, config, state, and cache
+  3. Refreshes the pacman package: sudo pacman -S --noconfirm opencode
+  4. Restores only chat history (no auth, config, snapshots, or state)
+
+You will be asked to type yes before anything is deleted.
+EOF
+}
+
+die() {
+  echo "error: $*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
+}
+
+table_exists() {
+  local db="$1" name="$2"
+  [[ "$(sqlite3 "$db" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='$name';")" == "1" ]]
+}
+
+count_table() {
+  local db="$1" name="$2"
+  if table_exists "$db" "$name"; then
+    sqlite3 "$db" "SELECT COUNT(*) FROM \"$name\";"
+  else
+    echo 0
+  fi
+}
+
+print_counts() {
+  local db="$1" label="$2"
+  echo "$label"
+  for t in session session_v2 message session_message part; do
+    printf "  %-18s %s\n" "$t" "$(count_table "$db" "$t")"
+  done
+}
+
+stop_opencode() {
+  if command -v opencode >/dev/null 2>&1; then
+    opencode service stop >/dev/null 2>&1 || true
+  fi
+  pkill -f '/opencode( |$)' >/dev/null 2>&1 || true
+  sleep 0.3
+}
+
+strip_non_history() {
+  local db="$1"
+  local sql="" t
+  sql+=$'PRAGMA foreign_keys = OFF;\nBEGIN;\n'
+  for t in "${STRIP_TABLES[@]}"; do
+    if table_exists "$db" "$t"; then
+      sql+="DELETE FROM \"$t\";"$'\n'
+    fi
+  done
+  sql+=$'COMMIT;\nPRAGMA foreign_keys = ON;\nVACUUM;\n'
+  sqlite3 "$db" "$sql"
+  sqlite3 "$db" "PRAGMA integrity_check;" | grep -qx ok || die "stripped history DB failed integrity_check"
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+[[ $# -eq 0 ]] || die "unexpected arguments. Try --help"
+
+need sqlite3
+need pacman
+need rsync
+need opencode
+[[ -f "$DB" ]] || die "OpenCode database not found: $DB"
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+BACKUP="$BACKUP_ROOT/$STAMP"
+FULL_DB="$BACKUP/opencode.db.full"
+HIST_DB="$BACKUP/opencode.db.history"
+
+echo "OpenCode refresh (keep chat history only)"
+echo
+echo "Will stop OpenCode, then:"
+echo "  backup  $BACKUP"
+echo "  wipe    $DATA"
+echo "  wipe    $CONFIG"
+echo "  wipe    $STATE"
+echo "  wipe    $CACHE"
+echo "  run     sudo pacman -S --noconfirm opencode"
+echo "  restore chat tables only into a new $DB"
+echo
+echo "Kept:     sessions, messages, parts, projects (needed to list chats)"
+echo "Removed:  auth, credentials, config, cache, state, snapshots, kv"
+echo
+print_counts "$DB" "Current database:"
+echo
+printf "Type yes to continue: "
+read -r answer
+[[ "$answer" == "yes" ]] || { echo "Aborted."; exit 1; }
+
+echo
+echo "==> Stopping OpenCode"
+stop_opencode
+
+echo "==> Backing up database"
+mkdir -p "$BACKUP"
+sqlite3 "$DB" ".backup '$FULL_DB'"
+cp -a "$FULL_DB" "$HIST_DB"
+sqlite3 "$FULL_DB" "PRAGMA integrity_check;" | grep -qx ok || die "full backup failed integrity_check"
+strip_non_history "$HIST_DB"
+print_counts "$HIST_DB" "History backup:"
+echo "Backup saved: $BACKUP"
+
+echo "==> Wiping OpenCode directories"
+rm -rf "$DATA" "$CONFIG" "$STATE" "$CACHE"
+
+echo "==> Refreshing package"
+sudo pacman -S --noconfirm opencode
+
+echo "==> Restoring chat history"
+mkdir -p "$DATA"
+cp -a "$HIST_DB" "$DB"
+chmod 600 "$DB"
+sqlite3 "$DB" "PRAGMA integrity_check;" | grep -qx ok || die "restored DB failed integrity_check"
+print_counts "$DB" "Restored database:"
+
+echo
+echo "Done."
+echo "Package:  $(pacman -Q opencode 2>/dev/null || true)"
+echo "History:  $HIST_DB"
+echo "Live DB:  $DB"
+echo "Re-authenticate in OpenCode when you next start it."
